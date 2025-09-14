@@ -13,11 +13,11 @@ const databases = new Databases(client)
 
 const DATABASE_ID = process.env.EXPO_PUBLIC_DB_ID!
 const HABITS_COLLECTION_ID = process.env.EXPO_PUBLIC_HABITS_COLLECTION_ID!
-
+const HABITS_COMPLETION_COLLECTION_ID= process.env.EXPO_PUBLIC_HABITS_COMPLETION_COLLECTION_ID!
 export interface RealTimeResponse {
     events: string[],
     payload:any;
 }
 
-export { account, client, DATABASE_ID, databases, HABITS_COLLECTION_ID };
+export { account, client, DATABASE_ID, databases, HABITS_COLLECTION_ID, HABITS_COMPLETION_COLLECTION_ID };
 

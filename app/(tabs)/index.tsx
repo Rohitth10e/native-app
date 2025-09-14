@@ -4,7 +4,7 @@ import { Habit } from "@/types/database.types";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import { useEffect, useRef, useState } from "react";
 import { ScrollView, StyleSheet, View } from "react-native";
-import { Query } from "react-native-appwrite";
+import { ID, Query } from "react-native-appwrite";
 import { Swipeable } from "react-native-gesture-handler";
 import { Button, Surface, Text } from "react-native-paper";
 export default function Index() {
@@ -21,7 +21,7 @@ export default function Index() {
         HABITS_COLLECTION_ID,
         [Query.equal("user_id", user?.$id ?? "")]
       );
-      console.log(response.documents)
+      // console.log(response.documents)
       setHabits(response.documents as Habit[]);
     } catch (err) {
       console.error(error)
@@ -71,6 +71,53 @@ export default function Index() {
     </View>
   )
 
+  const handleDeleteHabit = async (id: string) => {
+    try {
+      await databases.deleteDocument(DATABASE_ID, HABITS_COLLECTION_ID, id);
+    } catch (error) {
+      console.error(error.message);
+    }
+  }
+
+  const handleCompleteHabit = async (id: string) => {
+    try {
+      if (!user) return;
+
+      await databases.createDocument(DATABASE_ID, "habit_completions", ID.unique(), {
+        habit_id: id, user_id: user?.$id, completed_at: new Date().toISOString(),
+      });
+      const habit = habits?.find((h) => h.$id === id);
+
+      if (!habit) return
+
+      const today = new Date().toDateString();
+      const lastCompleted = habit.last_completed ? new Date(habit.last_completed).toDateString()
+        : null;
+      let newStreak = habit.streak_count;
+
+      if (lastCompleted === today && habit.streak_count > 0) {
+        // Already completed today → don’t increment
+        return;
+      } else if (
+        lastCompleted === new Date(Date.now() - 86400000).toDateString()
+      ) {
+        // Completed yesterday → continue streak
+        newStreak += 1;
+      } else {
+        // Missed a day → reset streak
+        newStreak = 1;
+      }
+
+
+      const updated = await databases.updateDocument(DATABASE_ID, HABITS_COLLECTION_ID, id, {
+        streak_count: newStreak, last_completed: new Date().toISOString()
+      })
+      console.log("Updated habit:", updated);
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
   return (
     <View
       style={styles.container}
@@ -92,6 +139,15 @@ export default function Index() {
                 overshootRight={false}
                 renderLeftActions={renderLeftActions}
                 renderRightActions={renderRightActions}
+                onSwipeableOpen={(direction) => {
+                  if (direction == "left") {
+                    handleDeleteHabit(habit.$id);
+                  } else if (direction == "right") {
+                    handleCompleteHabit(habit.$id);
+                  }
+
+                  swipeableRefs.current[habit.$id]?.close();
+                }}
               >
                 <Surface style={styles.card} elevation={0}>
                   <View key={key} style={styles.cardContent}>
