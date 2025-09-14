@@ -31,6 +31,8 @@ export default function AddHabitScreen() {
                 streak_count: 0,
                 last_completed: new Date().toISOString(),
             });
+            setDescription("")
+            setTitle("")
 
             router.back()
         } catch (err) {
