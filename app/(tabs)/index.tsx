@@ -1,6 +1,6 @@
 import { client, DATABASE_ID, databases, HABITS_COLLECTION_ID, RealTimeResponse } from "@/lib/appwrite";
 import { useAuth } from "@/lib/auth-context";
-import { Habit } from "@/types/database.types";
+import { Habit, HabitCompletion } from "@/types/database.types";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import { useEffect, useRef, useState } from "react";
 import { ScrollView, StyleSheet, View } from "react-native";
@@ -11,6 +11,7 @@ export default function Index() {
 
   const { signOut, user } = useAuth()
   const [habits, setHabits] = useState<Habit[]>();
+  const [completedHabits, setCompletedHabits] = useState<string[]>();
 
   const swipeableRefs = useRef<{ [key: string]: Swipeable | null }>({})
 
@@ -21,10 +22,10 @@ export default function Index() {
         HABITS_COLLECTION_ID,
         [Query.equal("user_id", user?.$id ?? "")]
       );
-      // console.log(response.documents)
+      console.log(response.documents)
       setHabits(response.documents as Habit[]);
     } catch (err) {
-      console.error(error)
+      console.error(err)
     }
   }
 
@@ -33,6 +34,7 @@ export default function Index() {
       const subscription = client.subscribe(
         `databases.${DATABASE_ID}.collections.${HABITS_COLLECTION_ID}.documents`,
         (response: RealTimeResponse) => {
+          console.log("Realtime update:", response);
           if (response.events.some(e => e.endsWith('.create'))) {
             fetchHabits();
           } else if (response.events.some(e => e.endsWith('.update'))) {
@@ -43,21 +45,37 @@ export default function Index() {
         }
       );
 
+      const completions = client.subscribe(
+        `databases.${DATABASE_ID}.collections.${"habit_collections"}.documents`,
+        (response: RealTimeResponse) => {
+          console.log("Realtime update:", response);
+          if (response.events.some(e => e.endsWith('.create'))) {
+            fetchTodayCompletions();
+          }
+        }
+      );
+
       fetchHabits();
+      fetchTodayCompletions();
 
       return () => {
         subscription(); // unsubscribe
+        completions();
       };
     }
   }, [user]);
 
-  const renderRightActions = () => (
+  const isHabitCompleted = (habitId: string) => completedHabits?.includes(habitId);
+
+  const renderRightActions = (habitId: string) => (
     <View style={styles.swipeActionRight}>
-      <MaterialCommunityIcons
-        name="check-circle-outline"
-        size={32}
-        color={"#fff"}
-      />
+      {isHabitCompleted(habitId) ? (<Text style={{ color: "#fff", paddingRight:10, fontWeight:"bold" }}>Completed</Text>) : (
+        <MaterialCommunityIcons
+          name="check-circle-outline"
+          size={32}
+          color={"#fff"}
+        />
+      )}
     </View>
   )
 
@@ -81,7 +99,7 @@ export default function Index() {
 
   const handleCompleteHabit = async (id: string) => {
     try {
-      if (!user) return;
+      if (!user || completedHabits?.includes(id)) return;
 
       await databases.createDocument(DATABASE_ID, "habit_completions", ID.unique(), {
         habit_id: id, user_id: user?.$id, completed_at: new Date().toISOString(),
@@ -90,33 +108,33 @@ export default function Index() {
 
       if (!habit) return
 
-      const today = new Date().toDateString();
-      const lastCompleted = habit.last_completed ? new Date(habit.last_completed).toDateString()
-        : null;
-      let newStreak = habit.streak_count;
-
-      if (lastCompleted === today && habit.streak_count > 0) {
-        // Already completed today → don’t increment
-        return;
-      } else if (
-        lastCompleted === new Date(Date.now() - 86400000).toDateString()
-      ) {
-        // Completed yesterday → continue streak
-        newStreak += 1;
-      } else {
-        // Missed a day → reset streak
-        newStreak = 1;
-      }
-
-
-      const updated = await databases.updateDocument(DATABASE_ID, HABITS_COLLECTION_ID, id, {
-        streak_count: newStreak, last_completed: new Date().toISOString()
+      await databases.updateDocument(DATABASE_ID, HABITS_COLLECTION_ID, id, {
+        streak_count: habit.streak_count + 1, last_completed: new Date().toISOString()
       })
-      console.log("Updated habit:", updated);
+      setCompletedHabits((prev) => [...(prev ?? []), id]);
     } catch (error) {
       console.error(error);
     }
   }
+
+  const fetchTodayCompletions = async () => {
+    try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const response = await databases.listDocuments(
+        DATABASE_ID,
+        "habit_completions",
+        [
+          Query.equal("user_id", user?.$id ?? ""),
+          Query.greaterThanEqual("completed_at", today.toISOString()),
+        ]
+      );
+      const completions = response.documents as HabitCompletion[];
+      setCompletedHabits(completions.map((c) => c.habit_id));
+    } catch (error) {
+      console.error(error);
+    }
+  };
 
   return (
     <View
@@ -138,7 +156,7 @@ export default function Index() {
                 overshootLeft={false}
                 overshootRight={false}
                 renderLeftActions={renderLeftActions}
-                renderRightActions={renderRightActions}
+                renderRightActions={() => renderRightActions(habit.$id)}
                 onSwipeableOpen={(direction) => {
                   if (direction == "left") {
                     handleDeleteHabit(habit.$id);
@@ -149,7 +167,10 @@ export default function Index() {
                   swipeableRefs.current[habit.$id]?.close();
                 }}
               >
-                <Surface style={styles.card} elevation={0}>
+                <Surface style={[
+                  styles.card,
+                  isHabitCompleted(habit.$id) && styles.cardCompleted
+                ]} elevation={0}>
                   <View key={key} style={styles.cardContent}>
                     <Text style={styles.cardTitle}>{habit.title}</Text>
                     <Text style={styles.cardDesc}>{habit.description}</Text>
@@ -213,6 +234,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 8,
     elevation: 4,
+  },
+  cardCompleted: {
+    opacity: 0.6
   },
   cardContent: {
     padding: 20,
